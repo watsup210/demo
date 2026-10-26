@@ -2,12 +2,15 @@ import { test, expect } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: "Find my journey" }),
+  ).toBeEnabled();
 });
 
 test("home renders all three categories without horizontal overflow", async ({
   page,
 }) => {
-  const errors: string[] = [];
+  const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(
     page.getByRole("heading", { name: "Where are we going?" }),
@@ -111,4 +114,59 @@ test("navigation placeholders and personalization switch work", async ({
   await expect(
     page.getByRole("heading", { name: "Where are we going?" }),
   ).toBeVisible();
+});
+
+test("search preview is returned by the Python API", async ({ page }) => {
+  await page.getByLabel("TO", { exact: true }).fill("Da Lat City");
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/search-preview") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Find my journey" }).click();
+  const response = await responsePromise;
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toMatchObject({
+    destination: "Da Lat City",
+    simulated: true,
+    phase: 1,
+  });
+  await expect(page.getByRole("dialog")).toContainText("Da Lat City");
+});
+
+test("catalogue failure blocks search and can be retried", async ({ page }) => {
+  await page.route("**/api/locations", (route) =>
+    route.fulfill({ status: 503, json: { detail: "unavailable" } }),
+  );
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText(
+    "Cannot load demo locations",
+  );
+  await expect(
+    page.getByRole("button", { name: "Find my journey" }),
+  ).toBeDisabled();
+  await page.unroute("**/api/locations");
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(
+    page.getByRole("button", { name: "Find my journey" }),
+  ).toBeEnabled();
+  await expect(page.getByRole("alert")).not.toBeVisible();
+});
+
+test("search network failure preserves form and allows retry", async ({
+  page,
+}) => {
+  await page.getByLabel("TO", { exact: true }).fill("Vung Tau City");
+  await page.route("**/api/search-preview", (route) => route.abort("failed"));
+  await page.getByRole("button", { name: "Find my journey" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Cannot reach the Python server",
+  );
+  await expect(page.getByLabel("TO", { exact: true })).toHaveValue(
+    "Vung Tau City",
+  );
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.unroute("**/api/search-preview");
+  await page.getByRole("button", { name: "Find my journey" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
 });

@@ -1,17 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "./components/Icon";
-import type { IconName } from "./components/Icon";
-import { inspiration, locations } from "./data/locations";
+import { inspiration } from "./data/inspiration";
+import { getLocations, previewSearch } from "./api";
 
-type Tab = "Explore" | "Saved trips" | "History" | "Preferences";
-const tabs: { name: Tab; icon: IconName }[] = [
+const tabs = [
   { name: "Explore", icon: "Compass" },
   { name: "Saved trips", icon: "Bookmark" },
   { name: "History", icon: "History" },
   { name: "Preferences", icon: "Settings2" },
 ];
 export default function App() {
-  const [tab, setTab] = useState<Tab>("Explore");
+  const [tab, setTab] = useState("Explore");
   const [origin, setOrigin] = useState("District 1, Ho Chi Minh City");
   const [destination, setDestination] = useState("");
   const [timing, setTiming] = useState("now");
@@ -20,18 +19,37 @@ export default function App() {
   const [error, setError] = useState("");
   const [summary, setSummary] = useState(false);
   const [menu, setMenu] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [locations, setLocations] = useState([]);
+  const [catalogueState, setCatalogueState] = useState("loading");
+  const [reloadCatalogue, setReloadCatalogue] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [preview, setPreview] = useState(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    setCatalogueState("loading");
+    getLocations(controller.signal)
+      .then((data) => {
+        setLocations(data.locations);
+        setCatalogueState("ready");
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") setCatalogueState("error");
+      });
+    return () => controller.abort();
+  }, [reloadCatalogue]);
+  const dialogRef = useRef(null);
+  const searchButtonRef = useRef(null);
   useEffect(() => {
     if (summary) dialogRef.current?.showModal();
     else dialogRef.current?.close();
   }, [summary]);
-  const chooseDestination = (value: string) => {
+  const chooseDestination = (value) => {
     setDestination(value);
     setTab("Explore");
     setError("");
     document.getElementById("destination")?.focus();
   };
-  const search = (event: React.SubmitEvent<HTMLFormElement>) => {
+  const search = async (event) => {
     event.preventDefault();
     if (!origin.trim() || !destination.trim()) {
       setError("Add both your starting point and destination.");
@@ -53,7 +71,21 @@ export default function App() {
       return;
     }
     setError("");
-    setSummary(true);
+    setSubmitting(true);
+    try {
+      const result = await previewSearch({
+        origin,
+        destination,
+        timing,
+        date: timing === "now" ? null : date,
+      });
+      setPreview(result);
+      setSummary(true);
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
   return (
     <div className="app-shell">
@@ -251,14 +283,42 @@ export default function App() {
                         />
                       </label>
                     )}
+                    {catalogueState === "loading" && (
+                      <p role="status" className="api-status">
+                        Loading demo locations…
+                      </p>
+                    )}
+                    {catalogueState === "error" && (
+                      <div role="alert" className="error">
+                        Cannot load demo locations. Check that the Python server
+                        is running.{" "}
+                        <button
+                          type="button"
+                          className="retry-button"
+                          onClick={() =>
+                            setReloadCatalogue((value) => value + 1)
+                          }
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    )}
                     {error && (
                       <p role="alert" className="error">
                         {error}
                       </p>
                     )}
-                    <button className="search-button" type="submit">
+                    <button
+                      ref={searchButtonRef}
+                      className="search-button"
+                      type="submit"
+                      disabled={catalogueState !== "ready" || submitting}
+                      aria-busy={submitting}
+                    >
                       <Icon name="Search" size={19} />
-                      Find my journey
+                      {submitting
+                        ? "Checking your journey…"
+                        : "Find my journey"}
                       <Icon name="ArrowRight" size={20} />
                     </button>
                     <div className="search-footnote">
@@ -351,25 +411,23 @@ export default function App() {
                   <br />
                   <strong>One connected journey.</strong>
                 </div>
-                {(
-                  [
-                    {
-                      icon: "BusFront",
-                      title: "Public buses",
-                      sub: "Everyday, made easy",
-                    },
-                    {
-                      icon: "CarFront",
-                      title: "Ride-hailing",
-                      sub: "Your first & last mile",
-                    },
-                    {
-                      icon: "TramFront",
-                      title: "Coaches & shuttles",
-                      sub: "A little further afield",
-                    },
-                  ] as { icon: IconName; title: string; sub: string }[]
-                ).map((m) => (
+                {[
+                  {
+                    icon: "BusFront",
+                    title: "Public buses",
+                    sub: "Everyday, made easy",
+                  },
+                  {
+                    icon: "CarFront",
+                    title: "Ride-hailing",
+                    sub: "Your first & last mile",
+                  },
+                  {
+                    icon: "TramFront",
+                    title: "Coaches & shuttles",
+                    sub: "A little further afield",
+                  },
+                ].map((m) => (
                   <div className="mode" key={m.title}>
                     <span>
                       <Icon name={m.icon} size={24} />
@@ -505,6 +563,10 @@ export default function App() {
         className="modal"
         aria-labelledby="confirmation-title"
         onCancel={() => setSummary(false)}
+        onClose={() => {
+          setSummary(false);
+          searchButtonRef.current?.focus();
+        }}
         onClick={(e) => {
           if (e.target === e.currentTarget) setSummary(false);
         }}
@@ -523,14 +585,14 @@ export default function App() {
         <div className="eyebrow">PHASE 1 · SEARCH PREVIEW</div>
         <h2 id="confirmation-title">Your next journey starts here.</h2>
         <p>
-          <strong>{origin}</strong>
+          <strong>{preview?.origin}</strong>
           <br />
-          to <strong>{destination}</strong>
+          to <strong>{preview?.destination}</strong>
         </p>
         <p>
-          {timing === "now"
+          {preview?.timing === "now"
             ? "Leave now"
-            : `${timing === "depart" ? "Depart at" : "Arrive by"} ${date.replace("T", " · ")}`}
+            : `${preview?.timing === "depart" ? "Depart at" : "Arrive by"} ${(preview?.date ?? "").replace("T", " · ")}`}
         </p>
         <div className="preview-note">
           Your search form is working. Simulated routes, prices and travel times

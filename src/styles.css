@@ -1366,3 +1366,6 @@ dialog.modal::backdrop {
   background: #122e26a6;
   backdrop-filter: blur(5px);
 }
+.api-status { font-size: 12px; color: #627a58; margin-bottom: 12px; }
+.retry-button { background: transparent; color: #086b51; text-decoration: underline; padding: 8px; }
+.search-button:disabled { opacity: .65; cursor: wait; }

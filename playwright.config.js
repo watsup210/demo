@@ -18,9 +18,17 @@ export default defineConfig({
       use: { ...devices["iPhone 13"], defaultBrowserType: "chromium" },
     },
   ],
-  webServer: {
-    command: "npm run dev -- --port 5173 --strictPort",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command:
+        "uv run --project backend --locked uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000",
+      url: "http://127.0.0.1:8000/api/health",
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command: "npm run dev -- --port 5173 --strictPort",
+      url: "http://127.0.0.1:5173",
+      reuseExistingServer: !process.env.CI,
+    },
+  ],
 });
